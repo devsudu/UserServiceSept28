@@ -1,5 +1,8 @@
 package dev.sudu.userservicesept28.services;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.sudu.userservicesept28.dtos.SendEmailDto;
 import dev.sudu.userservicesept28.models.Token;
 import dev.sudu.userservicesept28.models.User;
 import dev.sudu.userservicesept28.repositories.TokenRepository;
@@ -11,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
+import org.springframework.kafka.core.KafkaTemplate;
 
 import javax.crypto.SecretKey;
 import java.util.HashMap;
@@ -28,6 +32,10 @@ public class UserServiceImpl implements UserService {
     private BCryptPasswordEncoder bCryptPasswordEncoder;
     @Autowired
     private SecretKey secretKey;
+    @Autowired
+    private KafkaTemplate<String, String> kafkaTemplate;
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @Override
     public User signup(String name, String email, String password) {
@@ -40,7 +48,21 @@ public class UserServiceImpl implements UserService {
             throw new RuntimeException("User with email " + email + " already exists");
         }
 
-        return userRepository.save(User.builder().setName(name).setEmail(email).setPassword(bCryptPasswordEncoder.encode(password)).build());
+        User savedUser = userRepository.save(User.builder().setName(name).setEmail(email).setPassword(bCryptPasswordEncoder.encode(password)).build());
+
+        // Push a message to kafka to send a welcome email.
+
+        SendEmailDto emailDto = new SendEmailDto();
+        emailDto.setEmail(savedUser.getEmail());
+        emailDto.setSubject("Welcome " + savedUser.getName());
+        emailDto.setBody("Welcome to our platform");
+
+        try {
+            kafkaTemplate.send("sendWelcomeEmail", objectMapper.writeValueAsString(emailDto));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+        return savedUser;
     }
 
     @Override
